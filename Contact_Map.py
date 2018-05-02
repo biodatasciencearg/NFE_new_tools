@@ -50,7 +50,7 @@ def PDB2COM (pdbname,pdbout):
 		#increment COM counter
 		serial+=1
 		#Make pdb line output.
-		line="{:6s}{:5d} {:^4s}{:1s}{:3s} {:1s}{:4d}{:1s}   {:8.3f}{:8.3f}{:8.3f}{:6.2f}{:6.2f}          {:>2s}".format("ATOM ",serial,"COM","",resname,residuo.segid,residuo.resnum,"",CM[0],CM[1],CM[2],0.00,0.00,"C")
+		line="{:6s}{:5d} {:^4s}{:1s}{:3s} {:1s}{:4d}{:1s}   {:8.3f}{:8.3f}{:8.3f}{:6.2f}{:6.2f}          {:>2s}".format("ATOM ",serial,"CA","",resname,residuo.segid,residuo.resnum,"",CM[0],CM[1],CM[2],0.00,0.00,"C")
 		lines.append(str(line))
 	#open output file
         out = open(pdbout, 'w')
@@ -86,15 +86,17 @@ def parse_distance_file(inputfile):
 def make_matrices(pdbFile):
 	import MDAnalysis
 	from MDAnalysis.analysis import contacts
-	selection_string ='name CA' 
-	u = MDAnalysis.Universe(pdbFile)
-	ref = MDAnalysis.Universe(pdbFile)
+	selection_string ='protein' 
+	#u = MDAnalysis.Universe(pdbFile)
+	u=MDAnalysis.Universe(topfile,trajfile,topology_format=topformat,format=trjformat)
+	#ref = MDAnalysis.Universe(pdbFile)
         #select protein molecule
         protein       = u.select_atoms(selection_string)
 	#ref_selection = ref.select_atoms(selection_string)
-	#coms = contacts.Contacts(u, selection=(selection_string),
-        #                    refgroup=(ref_selection), radius=6.0)
-	#coms.run()
+	#
+	ca1 = contacts.Contacts(u, selection=(selection_string,selection_string), refgroup=(protein,protein), radius=6.0)
+	# iterate through trajectory and perform analysis of "native contacts" Q
+	ca1.run()
 
 	
 
@@ -109,7 +111,7 @@ def Contact_finder(sa,sb,selection_atom):
 		# Parse distance dictionary from file.
 		pair_distances_dicc=parse_distance_file(dist_file)
 		# write PDB files with COM of each sidechain.
-		#PDB2COM (sa,'stateA.pdb')
+		PDB2COM (sa,'stateA.pdb')
 		#PDB2COM (sb,'stateB.pdb')
 		#print(pair_distances_dicc['A_S'])
 		make_matrices('1AKE_solva.pdb')				
@@ -120,7 +122,7 @@ def dynamic_analizer(topfile, trajfile, topformat, trjformat, dist_file,selectio
         # cargo la dinamica.
         print('Loading Molecular Dynamic simulations....\n')
         traj=Universe(topfile,trajfile,topology_format=topformat,format=trjformat)
-        X = np.empty(shape=[0, 3])
+        #X = np.empty(shape=[0, 3])
         #creo una lista de residuos
         residues=traj.select_atoms("all").residues.resids
         #print(residues)
@@ -234,7 +236,8 @@ if __name__ == '__main__':
 		# ejecuto el programa propiamente dicho.
 		print(topfile, trajfile, topformat, trjformat, dist_file,selection_atom,sa,sb)
 		print("\n\nCalculating contacts ...\n\n")
-	        Contact_finder(sa,sb,selection_atom)	
-		#dynamic_analizer(topfile, trajfile, topformat, trjformat, dist_file, selection_atom)
+	        Contact_finder(sa,sb,selection_atom)
+		if topfile!=None:
+			dynamic_analizer(topfile, trajfile, topformat, trjformat, dist_file, selection_atom)
 		print("\n\nIt took--- %10.3f seconds ---" % (time.time() - start_time))
 

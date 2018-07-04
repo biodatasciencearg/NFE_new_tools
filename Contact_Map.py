@@ -9,6 +9,18 @@ import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
+def add_bond(r1,r2):
+        return("label add Atoms 0/%i \nlabel add Atoms 0/%i \nlabel add Bonds 0/%i 0/%i \n"% (r1-1,r2-1,r1-1,r2-1))
+
+
+
+#list of tuples.
+def bond_file_vmd(outfile,ltuples):
+	with open(outfile, 'w') as f:
+		for tup in ltuples:
+			f.write(add_bond(tup[0],tup[1]))
+	f.close
+
 
 def homespinner(state):
         if state:
@@ -76,47 +88,110 @@ def parse_distance_file(inputfile):
 
 
 
-#routine to generan 4 matrices from pdbFile:
-	#coordinate matrix  Coordinates(nxn)
-	#Distance   matrix  Distances(nxn)
-	#cutoff     matrix  cutoff(nxn)
-#Return
-	#contact_map matrix ContactMap(nxn) contact formed 1 otherwise 0.
+# procedure to make a square matrix (NxN) from a matrix of dimension N.
+def square_matrix_tuple(array_example,typea):
+        import numpy as np
+        # array length
+        alength=len(array_example)
+        #
+        squareArray = np.empty((alength,alength), dtype=typea)
+        for i, x in enumerate(array_example):
+                for j, y in enumerate(array_example):
+                        squareArray[i][j] = (x, y)
+        return squareArray
 
-def make_matrices(pdbFile):
+
+# routine to write a contact map file from a lists of parameters.
+def write_contact_file (initial_contacts_resid, distance_contacts_resid, resname_contacts_resid, outfile, selection_string, cutoff_array):
+	# tuple list to save the used tuples.
+	tuple_list =[]
+	with open(outfile + ".qlist", 'w') as f:
+		f.write("resid1 resid2 distance resname1 resname2 sel sel cutoff \n")
+		# Iterate over lists.
+		for t, d, tr, c in zip(initial_contacts_resid, distance_contacts_resid, resname_contacts_resid, cutoff_array):
+			# remove diagonal elements.
+			if t[0]!=t[1]:
+				# remove duplicate tuples, sorting the resids and defining a unique tuple.
+				if t[0]<t[1]:
+					tuple_correct = (t[0], t[1])
+				else:
+					tuple_correct = (t[1], t[0])
+				# just keep unique tuples. 
+				if not tuple_correct in tuple_list:
+					tuple_list.append(tuple_correct)
+					# formating output.
+					line= " %-10i %-10i %-10.4f %-10s %-10s %-10s %-10s %10.4f\n" % (tuple_correct[0], tuple_correct[1], d, tr[0], tr[1], selection_string, selection_string,c)
+					f.write(line)
+	#print bond file to load pdb with vmd.
+	bond_file_vmd(outfile +"_qlist.vmd",tuple_list)
+	f.close
+#
+def get_custom_matrix(dist_file,resnameArray,size):
+	pair_distances_dicc=parse_distance_file(dist_file)
+	squareArray = np.empty((size,size), dtype=float)	
+	#print(pair_distances_dicc['A_S'])	
+	for i, t in enumerate(resnameArray):
+		for j, e in enumerate(t):
+			key=str(e[0]) + "_" + str(e[1])
+			#print(i,j,key,pair_distances_dicc[key])
+			squareArray[i][j] = float(pair_distances_dicc[key])
+	return squareArray	
+
+# 3-letter code list to 1-letter code.
+def convert3to1(aminoList):
+	from MDAnalysis.lib.util import convert_aa_code
+	out = []
+	for r in aminoList:
+		out.append(convert_aa_code(r))
+	return out	
+		
+
+# get native contacts file from a string selection and a pdb file.
+def get_contacts_file(pdbIN, selection_string, selection, dist_file):
 	import MDAnalysis
 	from MDAnalysis.analysis import contacts
-	selection_string ='protein' 
-	#u = MDAnalysis.Universe(pdbFile)
-	u=MDAnalysis.Universe(topfile,trajfile,topology_format=topformat,format=trjformat)
-	#ref = MDAnalysis.Universe(pdbFile)
-        #select protein molecule
-        protein       = u.select_atoms(selection_string)
-	#ref_selection = ref.select_atoms(selection_string)
+	u = MDAnalysis.Universe(pdbIN  + "_COM.pdb")
+	#select protein molecule
+	protein       = u.select_atoms(selection_string)
+	#  resid square array
+	residArray   = square_matrix_tuple(protein.resids, [('r1', 'i'),('r2', 'i')])
+	# resname square array
+	resnameArray = square_matrix_tuple(convert3to1(protein.resnames), [('r1', 'S10'),('r2', 'S10')])
 	#
-	ca1 = contacts.Contacts(u, selection=(selection_string,selection_string), refgroup=(protein,protein), radius=6.0)
-	# iterate through trajectory and perform analysis of "native contacts" Q
-	ca1.run()
+	cutoff=get_custom_matrix(dist_file,resnameArray,len(protein.resnames))
+	# contacts routine 
+        ca1 = contacts.Contacts(u, selection=(selection_string,selection_string), refgroup=(protein, protein), radius=cutoff)
+	# initial contact list 
+	initial_contacts_resid  = residArray[ca1.initial_contacts]
+	# initial distance list
+	distance_contacts_resid = ca1.r0[0][ca1.initial_contacts] 
+	# initial  resname list
+	resname_contacts_resid  = resnameArray[ca1.initial_contacts]
+	cutoff_array = cutoff[ca1.initial_contacts]
+	# write the native contacts found.
+	write_contact_file(initial_contacts_resid, distance_contacts_resid, resname_contacts_resid, pdbIN, selection, cutoff_array)
 
+
+def get_contacts(pdbFile, selection, dist_file='distances.yml'):
+	if (selection is "COM"):
+		selection_string = "protein"
+	elif (selection is "CA"):
+		selection_string = "name CA"
+	get_contacts_file(pdbFile, selection_string, selection, dist_file)
 	
 
-def is_any_closer(r, r0, dist=2.5):
-        return np.any(r < dist)
-
-def Contact_finder(sa,sb,selection_atom):
+def Contact_finder(sa,sb,selection_atom,dist_file):
 	if selection_atom=='CA':
-		print("Entro en CA")
+		print(' Selected %s as an atom probe to search native contacts' % (selection_atom))
+                get_contacts(sa, 'CA')
 	elif selection_atom=='COM':
 		print(' Selected %s as an atom probe to search native contacts' % (selection_atom))
-		# Parse distance dictionary from file.
-		pair_distances_dicc=parse_distance_file(dist_file)
 		# write PDB files with COM of each sidechain.
-		PDB2COM (sa,'stateA.pdb')
+		pdb_com_name_sa = os.path.splitext(sa)[0] 
+		PDB2COM(sa,pdb_com_name_sa + "_COM.pdb")
 		#PDB2COM (sb,'stateB.pdb')
-		#print(pair_distances_dicc['A_S'])
-		make_matrices('1AKE_solva.pdb')				
-	elif selection_atom=='all':
-		print("Entro en all")
+		
+		get_contacts(pdb_com_name_sa, 'COM')				
 
 def dynamic_analizer(topfile, trajfile, topformat, trjformat, dist_file,selection_atom ):
         # cargo la dinamica.
@@ -229,14 +304,14 @@ if __name__ == '__main__':
 			usage()
 			sys.exit()
 	if not  (sa or sb):
-		print 'solventclust.py: pdbs files must be specified.'
+		print 'Contact_map.py: pdbs files must be specified.'
 		usage()
 		sys.exit()
 	else:
 		# ejecuto el programa propiamente dicho.
 		print(topfile, trajfile, topformat, trjformat, dist_file,selection_atom,sa,sb)
 		print("\n\nCalculating contacts ...\n\n")
-	        Contact_finder(sa,sb,selection_atom)
+	        Contact_finder(sa,sb,selection_atom,dist_file)
 		if topfile!=None:
 			dynamic_analizer(topfile, trajfile, topformat, trjformat, dist_file, selection_atom)
 		print("\n\nIt took--- %10.3f seconds ---" % (time.time() - start_time))
